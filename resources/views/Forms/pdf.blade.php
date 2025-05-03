@@ -1,45 +1,28 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
+
 <head>
-    <meta charset="utf-8">
-    <title>{{ $title }}</title>
-    <style>
-        body {
-            font-family: DejaVu Sans, sans-serif;
-            font-size: 12px;
-            line-height: 1.6;
-            color: #000;
-        }
-        .form-title {
-            text-align: center;
-            font-size: 18px;
-            margin-bottom: 20px;
-            font-weight: bold;
-        }
-        .field {
-            margin-bottom: 15px;
-        }
-        .field-label {
-            font-weight: bold;
-        }
-        .field-value {
-            border-bottom: 1px solid #ccc;
-            padding: 4px 0;
-        }
-    </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ htmlspecialchars($title ?? 'Document') }}</title>
 </head>
 <body>
+    <h1>{{ htmlspecialchars($title ?? 'Document') }}</h1>
 
-    <div class="form-title">{{ $title }}</div>
-
-    @foreach($fields as $key => $value)
-        <div class="field">
-            <div class="field-label">{{ ucfirst(str_replace('_', ' ', $key)) }}:</div>
-            <div class="field-value">
-                {{ $value ?: '—' }}
-            </div>
-        </div>
-    @endforeach
-
+    <table border="1" cellpadding="8" cellspacing="0" width="100%">
+        @if(!empty($fields) && is_array($fields))
+            @foreach($fields as $key => $value)
+                <tr>
+                    <td><strong>{{ htmlspecialchars(ucwords(str_replace('_', ' ', $key))) }}</strong></td>
+                    <td>{{ htmlspecialchars($value) }}</td>
+                </tr>
+            @endforeach
+        @else
+            <tr>
+                <td colspan="2">No data available</td>
+            </tr>
+        @endif
+    </table>
+    <p>Submitted at: {{ now()->toDateTimeString() }}</p>
 </body>
 </html>

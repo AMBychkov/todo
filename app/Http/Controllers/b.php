@@ -2,21 +2,24 @@
 
 namespace App\Http\Controllers;
 
-use App\Mail\UserForms\FormSubmissionMail;
-use Illuminate\Http\Request;
+use App\Mail\FormSubmissionMail;
+use App\Models\SubmittedForm;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
-use Mail;
-use Storage;
-use Str;
+use Illuminate\Support\Str;
+
+use function PHPUnit\Framework\isArray;
 
 class UserFormController extends Controller
 {
     protected function getFormConfig($formKey)
     {
         /*
-        For example, few forms have been added to the controller, but if necessary,
+        For example, two forms have been added to the controller, but if necessary,
         they can be moved to a separate file or use a database.
         */
         return match ($formKey) {
@@ -24,29 +27,25 @@ class UserFormController extends Controller
                 'title' => 'External Access Request',
                 'description' => 'To request an employee be granted external access to company information when outside of Elias Woodwork’s facilities please fill in the following and submit to HR for approval. If a mobile phone or laptop is required, please note that in the devices section. ',
                 'fields' => [
-                    'names-group' => [
-                        'supervisor' => [
-                            'name' => 'supervisor',
-                            'label' => 'Supervisor',
-                            'type' => 'text',
-                            'rules' => ['required', 'max:255'],
-                            'placeholder' => 'Enter Full name',
-                            'required' => true,
-                        ],
-                        'employee' => [
-                            'name' => 'employee',
-                            'label' => 'Employee',
-                            'type' => 'text',
-                            'rules' => ['required', 'max:255'],
-                            'placeholder' => 'Enter Full name',
-                            'required' => true,
-                        ],
+                    'supervisor' => [
+                        'label' => 'Supervisor',
+                        'type' => 'text',
+                        'rules' => ['required', 'max:255'],
+                        'placeholder' => 'Enter Full name',
+                        'required' => true,
+                    ],
+                    'employee' => [
+                        'label' => 'Employee',
+                        'type' => 'text',
+                        'rules' => ['required', 'max:255'],
+                        'placeholder' => 'Enter Full name',
+                        'required' => true,
                     ],
                     'access-type' => [
-                        'name' => 'access-type',
                         'label' => 'Type of Access (Check all that apply) ',
                         'type' => 'checkbox-group',
                         'options' => ['External Email Access', 'External VPN Access',],
+                        'rules' => ['array',],
                         'required' => true,
                     ],
                     'device-used' => [
@@ -90,6 +89,7 @@ class UserFormController extends Controller
                         'type' => 'text',
                         'rules' => ['required', 'max:255'],
                         'placeholder' => 'Enter Full name',
+                        'required' => true,
                     ],
                     'shift' => [
                         'label' => 'Shift',
@@ -103,12 +103,14 @@ class UserFormController extends Controller
                         'type' => 'tel',
                         'rules' => ['required', 'regex:/^\+?[0-9\s\-\(\)]{7,20}$/'],
                         'placeholder' => 'Enter phone number',
+                        'required' => false,
                     ],
                     'status' => [
                         'label' => 'Active',
                         'type' => 'radio',
                         'options' => ['Yes', 'No'],
                         'rules' => ['required'],
+                        'required' => true,
                     ],
                     'supervisor' => [
                         'label' => 'Supervisor',
@@ -119,7 +121,8 @@ class UserFormController extends Controller
                     'file' => [
                         'label' => 'Photo',
                         'type' => 'file',
-
+                        'rules' => ['required', 'max:10255'],
+                        'required' => true,
                     ],
                 ],
             ],
@@ -189,7 +192,7 @@ class UserFormController extends Controller
         if (!$formConfig) {
             abort(404, 'Form not found');
         }
-        dd($formConfig);
+
         return view('forms.show', [
             'formKey' => $formKey,
             'formConfig' => $formConfig,
@@ -201,7 +204,6 @@ class UserFormController extends Controller
         if (!$formConfig) {
             abort(404, 'Form Not Found');
         }
-
         // Validation
         $rules = [];
         foreach ($formConfig['fields'] as $name => $field) {
@@ -239,7 +241,6 @@ class UserFormController extends Controller
         }
         $formData = $request->validate($rules);
         $embeddedImages = [];
-        $attachments = [];
 
         // Date interval in one field
         if(isset($formData['date-range-start']) && isset($formData['date-range-end'])) {
@@ -249,7 +250,7 @@ class UserFormController extends Controller
 
         // Save upload file
         foreach ($formConfig['fields'] as $name => $field){
-            if ($field['type'] === 'checkbox' || $field['type'] === 'checkbox-group' && empty($formData[$name])){
+            if (isArray($field) && empty($field)) {
                 unset($formData[$name]);
             }
             if ($field['type'] === 'file' && $request->hasFile($name)) {
@@ -257,10 +258,8 @@ class UserFormController extends Controller
                 $filepath = $uploadedfile->store('attachments', 'public');
                 $formData[$name] = $filepath; //Adding file path to form
 
-                $fullPath = storage_path('app/public/' . $filepath);
-                $attachments[] = $fullPath;
-
                 //Prepare embedded image
+                $fullPath = storage_path('app/public/' . $filepath);
                 if (Str::startsWith(File::mimeType($fullPath), 'image/')){
                     $mimeType = File::mimeType($fullPath);
                     $base64 = 'data:' . $mimeType . ';base64,' . base64_encode(File::get($fullPath));
@@ -283,13 +282,12 @@ class UserFormController extends Controller
         File::put($jsonPath . $fileName, json_encode($formDataWithName, JSON_PRETTY_PRINT));
 
         //store in db
-        /* Need to create table and model,
-         This code saved json string in db
+
          SubmittedForm::create([
             'form_name' => $formConfig['title'] ?? 'Untitled Form',
             'form_json' => $formData,
         ]);
-        */
+
 
         // Preparation data for PDF
         $pdfData = [
@@ -303,11 +301,13 @@ class UserFormController extends Controller
 
         // Save PDF in file
         $pdfContent = $pdf->output();
+        dd($formData);
         $relativePath = 'pdf/form_' . now()->format('Ymd_His') . '.pdf';
         Storage::disk('public')->put($relativePath, $pdfContent);
         $attachmentPath = 'app/public/' . $relativePath;
         Mail::to('admin@example.com')->send(new FormSubmissionMail($pdfData, $attachmentPath));
         // Show pdf in browser
         return $pdf->stream('form_submission.pdf');
+
     }
 }
